@@ -13,8 +13,8 @@ android {
         applicationId 'com.pengxh.daily.app'
         minSdk 26
         targetSdk 36
-        versionCode 2261
-        versionName '2.2.6.1'
+        versionCode 2310
+        versionName '2.3.1.0'
         ndkVersion '21.4.7075529'
 
         ndk {
@@ -46,7 +46,7 @@ android {
         }
     }
 
-//    GString id = "com.alibaba.android.${createRandomCode()}"
+//    GString id = "com.alibaba.android.${randomCode()}"
 //    productFlavors {
 //        daily {
 //            applicationId = id
@@ -56,6 +56,7 @@ android {
     packagingOptions {
         exclude 'META-INF/NOTICE.md'
         exclude 'META-INF/LICENSE.md'
+        exclude 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
     }
 
     compileOptions {
@@ -86,7 +87,7 @@ android {
     }
 }
 
-static def createRandomCode() {
+static def randomCode() {
     String alphabetsInLowerCase = 'abcdefghijklmnopqrstuvwxyz'
     String randomString = ""
     for (i in 0..5) {
@@ -102,12 +103,11 @@ static def getBuildDate() {
 }
 
 dependencies {
-    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.core:core-ktx:1.17.0'
     implementation 'com.github.AndroidCoderPeng:Kotlin-lite-lib:1.1.7'
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'com.google.android.material:material:1.13.0'
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
-    implementation 'com.scwang.smartrefresh:SmartRefreshLayout:1.1.0'
     //数据库框架
     implementation 'androidx.room:room-runtime:2.8.2'
     annotationProcessor 'androidx.room:room-compiler:2.8.2'
@@ -115,19 +115,18 @@ dependencies {
     implementation 'com.sun.mail:android-mail:1.6.8'
     implementation 'com.sun.mail:android-activation:1.6.8'
     //日期、时间选择器
-    implementation 'com.github.gzu-liyujiang.AndroidPicker:WheelPicker:4.1.14'
+    implementation 'com.github.gzu-liyujiang.AndroidPicker:WheelPicker:4.1.15'
     implementation 'com.google.code.gson:gson:2.13.2'
     //事件总线
     implementation 'org.greenrobot:eventbus:3.3.1'
     //异常日志记录
-    //noinspection Aligned16KB
     implementation 'com.tencent.bugly:crashreport:4.1.9.3'
     //返回值转换器
     implementation 'com.jakewharton.retrofit:retrofit2-kotlin-coroutines-adapter:0.9.2'
     implementation 'com.squareup.retrofit2:converter-gson:3.0.0'
     //okhttp3日志拦截器
-    implementation 'com.squareup.okhttp3:logging-interceptor:5.1.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:5.3.2'
     //网络请求和接口封装
     implementation 'com.squareup.retrofit2:retrofit:3.0.0'
-    implementation 'com.squareup.okhttp3:okhttp:5.1.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.3.2'
 }

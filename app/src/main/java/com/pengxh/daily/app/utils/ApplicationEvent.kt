@@ -22,7 +22,7 @@ sealed class ApplicationEvent {
      */
     object StartDailyTask : ApplicationEvent()
     object StopDailyTask : ApplicationEvent()
-    data class SetResetTaskTime(val hour: Int) : ApplicationEvent()
+    object SetResetTaskTime : ApplicationEvent()
     data class UpdateResetTickTime(val countDownTime: String) : ApplicationEvent()
     object ResetDailyTask : ApplicationEvent()
 
@@ -31,7 +31,7 @@ sealed class ApplicationEvent {
      */
     object ShowFloatingWindow : ApplicationEvent()
     object HideFloatingWindow : ApplicationEvent()
-    object StartCountdownTime : ApplicationEvent()
+    data class StartCountdownTime(val isRemoteCommand: Boolean) : ApplicationEvent()
     data class UpdateFloatingViewTime(val tick: Int) : ApplicationEvent()
     data class SetTaskOvertime(val time: Int) : ApplicationEvent()
 
@@ -39,4 +39,22 @@ sealed class ApplicationEvent {
      * 导航事件
      */
     object GoBackMainActivity : ApplicationEvent()
+
+    /**
+     * 截屏事件
+     */
+    object CaptureScreen : ApplicationEvent()
+    data class CaptureCompleted(val imagePath: String) : ApplicationEvent()
+
+
+    /**
+     * 投影截屏事件
+     */
+    object ProjectionReady : ApplicationEvent()
+    object ProjectionFailed : ApplicationEvent()
+
+    /**
+     * 中国节假日数据状态变化事件
+     */
+    object HolidayDataStatusChanged : ApplicationEvent()
 }

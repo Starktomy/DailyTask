@@ -33,14 +33,6 @@ object DatabaseWrapper {
     /*****************************************************************************************/
     private val noticeDao by lazy { DailyTaskApplication.get().dataBase.noticeDao() }
 
-    fun deleteAllNotice() {
-        noticeDao.deleteAll()
-    }
-
-    fun loadNoticeByTime(pageSize: Int, offset: Int): MutableList<NotificationBean> {
-        return noticeDao.loadNoticeByTime(pageSize, offset)
-    }
-
     fun loadCurrentDayNotice(): MutableList<NotificationBean> {
         return noticeDao.loadCurrentDayNotice(TimeKit.getTodayDate())
     }
@@ -61,7 +53,7 @@ object DatabaseWrapper {
         emailConfigDao.insert(bean)
     }
 
-    fun loadAll(): List<EmailConfigBean> {
-        return emailConfigDao.loadAll()
+    fun loadLatestEmailConfig(): EmailConfigBean? {
+        return emailConfigDao.loadEmailConfig()
     }
 }

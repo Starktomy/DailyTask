@@ -3,6 +3,7 @@ package com.pengxh.daily.app
 import android.app.Application
 import androidx.room.Room.databaseBuilder
 import com.pengxh.daily.app.sqlite.DailyTaskDataBase
+import com.pengxh.daily.app.utils.ChinaHolidayRemoteUpdater
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.tencent.bugly.crashreport.CrashReport
@@ -33,11 +34,12 @@ class DailyTaskApplication : Application() {
         SaveKeyValues.initSharedPreferences(this)
         LogFileManager.initLogFile(this)
 
-        val isDebugMode = BuildConfig.DEBUG
-        CrashReport.initCrashReport(this, "ecbdc9baf5", isDebugMode)
+        CrashReport.initCrashReport(this, "ecbdc9baf5", BuildConfig.DEBUG)
 
         dataBase = databaseBuilder(this, DailyTaskDataBase::class.java, "DailyTask.db")
             .allowMainThreadQueries()
             .build()
+
+        ChinaHolidayRemoteUpdater.refreshIfNeeded(this)
     }
 }

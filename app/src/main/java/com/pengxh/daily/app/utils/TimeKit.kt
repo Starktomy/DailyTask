@@ -5,9 +5,9 @@ import java.util.Date
 import java.util.Locale
 
 object TimeKit {
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA)
 
     fun getTodayDate(): String {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA)
         return dateFormat.format(Date())
     }
 }

@@ -2,6 +2,7 @@ package com.pengxh.daily.app.utils
 
 import android.os.CountDownTimer
 import android.os.Handler
+import android.os.Looper
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import org.greenrobot.eventbus.EventBus
 
@@ -13,13 +14,12 @@ import org.greenrobot.eventbus.EventBus
  * 2. 向悬浮窗广播倒计时更新
  * 3. 处理超时后的逻辑（返回主界面、发送异常邮件）
  * 4. 提供定时器取消接口
- *
- * @param mainHandler 主线程Handler
  */
-class TimeoutTimerManager(private val mainHandler: Handler) {
-
+class TimeoutTimerManager() {
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var timeoutTimer: CountDownTimer? = null
     private var timeoutSeconds: Int = 0
+    private var hasCaptured = false
 
     /**
      * 启动超时定时器
@@ -27,6 +27,7 @@ class TimeoutTimerManager(private val mainHandler: Handler) {
      * @param onTimeout 超时回调，当倒计时结束时触发
      */
     fun startTimeoutTimer(onTimeout: () -> Unit) {
+        hasCaptured = false
         // 取消之前的定时器，防止重复创建
         cancelTimeoutTimer()
 
@@ -45,6 +46,15 @@ class TimeoutTimerManager(private val mainHandler: Handler) {
                 val tick = (millisUntilFinished / 1000).toInt()
                 // 更新悬浮窗倒计时
                 EventBus.getDefault().post(ApplicationEvent.UpdateFloatingViewTime(tick))
+
+                // 启用截屏
+                val resultSource = SaveKeyValues.getValue(Constant.RESULT_SOURCE_KEY, 0) as Int
+                if (resultSource == 1) {
+                    if (tick <= 3 && !hasCaptured) {
+                        hasCaptured = true
+                        EventBus.getDefault().post(ApplicationEvent.CaptureScreen)
+                    }
+                }
             }
 
             override fun onFinish() {
@@ -52,6 +62,7 @@ class TimeoutTimerManager(private val mainHandler: Handler) {
                     onTimeout()
                 }
                 timeoutTimer = null
+                hasCaptured = false
             }
         }
         timeoutTimer?.start()
@@ -63,6 +74,10 @@ class TimeoutTimerManager(private val mainHandler: Handler) {
     fun cancelTimeoutTimer() {
         timeoutTimer?.cancel()
         timeoutTimer = null
+    }
+
+    fun isRunning(): Boolean {
+        return timeoutTimer != null
     }
 
     /**
