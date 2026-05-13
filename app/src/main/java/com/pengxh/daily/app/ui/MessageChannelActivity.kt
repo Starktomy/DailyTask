@@ -152,6 +152,39 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
 
             sendTestEmail()
         }
+
+        binding.fsRadioButton.setOnClickListener {
+            val key = SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String
+            if (binding.fsRadioButton.isChecked && key.isNotBlank()) {
+                SaveKeyValues.putValue(Constant.CHANNEL_TYPE_KEY, 2)
+                binding.wxRadioButton.isChecked = false
+                binding.qqRadioButton.isChecked = false
+            } else {
+                "请先配置飞书 Webhook 链接".show(this)
+                binding.fsRadioButton.isChecked = false
+            }
+        }
+
+        binding.sendFsButton.setOnClickListener {
+            val key = binding.fsKeyView.text.toString()
+            if (key.isBlank()) {
+                "飞书 Webhook 链接为空".show(this)
+                return@setOnClickListener
+            }
+
+            SaveKeyValues.putValue(
+                Constant.MESSAGE_TITLE_KEY,
+                binding.messageTitleView.text.toString().trim()
+            )
+            SaveKeyValues.putValue(Constant.FS_WEB_HOOK_KEY, key)
+
+            MaterialAlertDialogBuilder(this)
+                .setTitle("测试消息")
+                .setMessage("飞书配置完成，可以发送飞书消息。\n\n是否继续？")
+                .setCancelable(false)
+                .setPositiveButton("继续") { _, _ -> sendTestMessage() }
+                .setNegativeButton("取消", null).show()
+        }
     }
 
     private fun sendTestMessage() {

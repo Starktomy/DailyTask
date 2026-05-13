@@ -202,6 +202,11 @@ class NotificationMonitorService : NotificationListenerService() {
                 emailManager.sendEmail(title, content, false)
             }
 
+            2 -> {
+                // 飞书
+                httpRequestManager.sendFeishuMessage(title, content)
+            }
+
             else -> {
                 Log.d(kTag, "sendChannelMessage: 消息渠道不支持")
             }

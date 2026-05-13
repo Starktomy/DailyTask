@@ -68,4 +68,43 @@ class HttpRequestManager(private val context: Context) {
             }
         }
     }
+
+    fun sendFeishuMessage(title: String, message: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val webhookUrl = SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String
+            if (webhookUrl.isBlank()) {
+                Log.e(kTag, "飞书 Webhook URL 未配置")
+                return@launch
+            }
+
+            val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val content = buildString {
+                appendLine(title)
+                appendLine(message)
+                appendLine("当前日期：${System.currentTimeMillis().timestampToDate()}")
+                appendLine("当前电量：${if (battery >= 0) "$battery%" else "未知"}")
+                append("版本号：${BuildConfig.VERSION_NAME}")
+            }
+
+            val jsonBody = JSONObject().apply {
+                put("msg_type", "text")
+                put("content", JSONObject().apply {
+                    put("text", content)
+                })
+            }
+
+            val requestBody = jsonBody.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val request = Request.Builder().url(webhookUrl).post(requestBody).build()
+
+            try {
+                val response = okHttpClient.newCall(request).execute()
+                val responseBody = response.body.string()
+                Log.d(kTag, "飞书响应: $responseBody")
+            } catch (e: Exception) {
+                Log.e(kTag, "飞书发送失败", e)
+            }
+        }
+    }
 }

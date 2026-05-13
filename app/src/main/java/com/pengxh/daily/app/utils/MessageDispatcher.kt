@@ -40,6 +40,22 @@ class MessageDispatcher(private val context: Context, private val viewModel: Mes
                 }
                 emailManager.sendEmail(title.ifBlank { messageTitle }, content, false)
             }
+
+            2 -> {
+                // 飞书
+                val battery = batteryManager.getIntProperty(
+                    BatteryManager.BATTERY_PROPERTY_CAPACITY
+                )
+                val feishuContent = buildString {
+                    appendLine(title.ifBlank { messageTitle })
+                    appendLine(content.ifBlank { "未监听到打卡成功的通知，请手动登录检查" })
+                    appendLine("当前日期：${System.currentTimeMillis().timestampToDate()}")
+                    appendLine("当前电量：${if (battery >= 0) "$battery%" else "未知"}")
+                    append("版本号：${BuildConfig.VERSION_NAME}")
+                }
+                val httpRequestManager = HttpRequestManager(context)
+                httpRequestManager.sendFeishuMessage(title.ifBlank { messageTitle }, feishuContent)
+            }
         }
     }
 

@@ -23,6 +23,7 @@ object Constant {
     const val TARGET_APP_KEY = "TARGET_APP_KEY"
     const val MESSAGE_TITLE_KEY = "MESSAGE_TITLE_KEY"
     const val WX_WEB_HOOK_KEY = "WX_WEB_HOOK_KEY"
+    const val FS_WEB_HOOK_KEY = "FS_WEB_HOOK_KEY"
     const val CHANNEL_TYPE_KEY = "CHANNEL_TYPE_KEY"
     const val RESULT_SOURCE_KEY = "RESULT_SOURCE_KEY"
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY"
