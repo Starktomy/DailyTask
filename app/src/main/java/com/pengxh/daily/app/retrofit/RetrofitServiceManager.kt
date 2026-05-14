@@ -16,19 +16,38 @@ object RetrofitServiceManager {
     }
 
     suspend fun sendMessage(content: String): String {
-        val jsonBody = JSONObject().apply {
-            put("msgtype", "text")
-            put("text", JSONObject().apply {
-                put("content", content)
-            })
+        val channelType = SaveKeyValues.getValue(Constant.CHANNEL_TYPE_KEY, 0) as Int
+        return if (channelType == 2) {
+            // 飞书
+            val webhookUrl = (SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String).trim()
+            if (webhookUrl.isBlank()) {
+                return "{\"code\":-1,\"msg\":\"飞书 Webhook URL 未配置\"}"
+            }
+            val jsonBody = JSONObject().apply {
+                put("msg_type", "text")
+                put("content", JSONObject().apply {
+                    put("text", content)
+                })
+            }
+            val requestBody = jsonBody.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            api.sendFeishuMessage(webhookUrl, requestBody)
+        } else {
+            // 企业微信
+            val jsonBody = JSONObject().apply {
+                put("msgtype", "text")
+                put("text", JSONObject().apply {
+                    put("content", content)
+                })
+            }
+
+            val requestBody = jsonBody.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val keyMap = HashMap<String, String>()
+            keyMap["key"] = (SaveKeyValues.getValue(Constant.WX_WEB_HOOK_KEY, "") as String).trim()
+            api.sendMessage(requestBody, keyMap)
         }
-
-        val requestBody = jsonBody.toString()
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
-
-        val keyMap = HashMap<String, String>()
-        keyMap["key"] = SaveKeyValues.getValue(Constant.WX_WEB_HOOK_KEY, "") as String
-        return api.sendMessage(requestBody, keyMap)
     }
 
     suspend fun sendImageMessage(imagePath: String): String {
@@ -53,7 +72,7 @@ object RetrofitServiceManager {
             .toRequestBody("application/json; charset=utf-8".toMediaType())
 
         val keyMap = HashMap<String, String>()
-        keyMap["key"] = SaveKeyValues.getValue(Constant.WX_WEB_HOOK_KEY, "") as String
+        keyMap["key"] = (SaveKeyValues.getValue(Constant.WX_WEB_HOOK_KEY, "") as String).trim()
         return api.sendMessage(requestBody, keyMap)
     }
 }

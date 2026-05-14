@@ -81,7 +81,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
         }
 
         binding.sendWxButton.setOnClickListener {
-            val key = binding.wxKeyView.text.toString()
+            val key = binding.wxKeyView.text.toString().trim()
             if (key.isBlank()) {
                 "企业微信消息 Webhook key 为空".show(this)
                 return@setOnClickListener
@@ -92,6 +92,10 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                 binding.messageTitleView.text.toString().trim()
             )
             SaveKeyValues.putValue(Constant.WX_WEB_HOOK_KEY, key)
+            SaveKeyValues.putValue(Constant.CHANNEL_TYPE_KEY, 0)
+            binding.wxRadioButton.isChecked = true
+            binding.fsRadioButton.isChecked = false
+            binding.qqRadioButton.isChecked = false
 
             MaterialAlertDialogBuilder(this)
                 .setTitle("测试消息")
@@ -154,7 +158,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
         }
 
         binding.fsRadioButton.setOnClickListener {
-            val key = SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String
+            val key = (SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String).trim()
             if (binding.fsRadioButton.isChecked && key.isNotBlank()) {
                 SaveKeyValues.putValue(Constant.CHANNEL_TYPE_KEY, 2)
                 binding.wxRadioButton.isChecked = false
@@ -166,7 +170,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
         }
 
         binding.sendFsButton.setOnClickListener {
-            val key = binding.fsKeyView.text.toString()
+            val key = binding.fsKeyView.text.toString().trim()
             if (key.isBlank()) {
                 "飞书 Webhook 链接为空".show(this)
                 return@setOnClickListener
@@ -177,6 +181,10 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                 binding.messageTitleView.text.toString().trim()
             )
             SaveKeyValues.putValue(Constant.FS_WEB_HOOK_KEY, key)
+            SaveKeyValues.putValue(Constant.CHANNEL_TYPE_KEY, 2)
+            binding.fsRadioButton.isChecked = true
+            binding.wxRadioButton.isChecked = false
+            binding.qqRadioButton.isChecked = false
 
             MaterialAlertDialogBuilder(this)
                 .setTitle("测试消息")

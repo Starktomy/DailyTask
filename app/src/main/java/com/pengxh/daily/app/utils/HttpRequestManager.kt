@@ -30,7 +30,7 @@ class HttpRequestManager(private val context: Context) {
 
     fun sendMessage(title: String, message: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            val webhookKey = SaveKeyValues.getValue(Constant.WX_WEB_HOOK_KEY, "") as String
+            val webhookKey = (SaveKeyValues.getValue(Constant.WX_WEB_HOOK_KEY, "") as String).trim()
             if (webhookKey.isBlank()) {
                 Log.e(kTag, "企业微信 Webhook Key 未配置")
                 return@launch
@@ -71,7 +71,7 @@ class HttpRequestManager(private val context: Context) {
 
     fun sendFeishuMessage(title: String, message: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            val webhookUrl = SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String
+            val webhookUrl = (SaveKeyValues.getValue(Constant.FS_WEB_HOOK_KEY, "") as String).trim()
             if (webhookUrl.isBlank()) {
                 Log.e(kTag, "飞书 Webhook URL 未配置")
                 return@launch

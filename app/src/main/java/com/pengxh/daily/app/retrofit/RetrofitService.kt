@@ -4,6 +4,7 @@ import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.QueryMap
+import retrofit2.http.Url
 
 interface RetrofitService {
     /**
@@ -14,5 +15,14 @@ interface RetrofitService {
     suspend fun sendMessage(
         @Body requestBody: RequestBody,
         @QueryMap map: Map<String, String>
+    ): String
+
+    /**
+     * 飞书推送消息
+     */
+    @POST
+    suspend fun sendFeishuMessage(
+        @Url url: String,
+        @Body requestBody: RequestBody
     ): String
 }
