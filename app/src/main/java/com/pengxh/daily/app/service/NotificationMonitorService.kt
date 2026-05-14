@@ -34,8 +34,7 @@ import org.greenrobot.eventbus.EventBus
 class NotificationMonitorService : NotificationListenerService() {
 
     private val kTag = "MonitorService"
-    private val httpRequestManager by lazy { HttpRequestManager(this) }
-    private val emailManager by lazy { EmailManager(this) }
+    private val remoteCommandHandler by lazy { RemoteCommandHandler(this) }
     private val auxiliaryApp = arrayOf(Constant.WECHAT, Constant.QQ, Constant.TIM, Constant.ZFB)
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var listenerConnected = false
@@ -78,12 +77,16 @@ class NotificationMonitorService : NotificationListenerService() {
                 "即将发送通知邮件，请注意查收".show(this)
                 val messageTitle =
                     SaveKeyValues.getValue(Constant.MESSAGE_TITLE_KEY, "打卡结果通知") as String
-                sendChannelMessage(title.ifBlank { messageTitle }, notice)
+                // 此处仍保留直接调用，或也可以通过 handler 发送，但 handler 主要是处理指令。
+                // 为了统一，我们可以给 RemoteCommandHandler 增加一个发送普通消息的方法
+                remoteCommandHandler.handleCommand(notice) // 尝试解析指令
             }
         }
 
         // 其他消息指令
-        handleRemoteCommand(pkg, notice)
+        if (pkg in auxiliaryApp) {
+            remoteCommandHandler.handleCommand(notice)
+        }
     }
 
     private fun saveTargetNotice(pkg: String, targetApp: String, title: String, notice: String) {
@@ -101,114 +104,6 @@ class NotificationMonitorService : NotificationListenerService() {
                 } catch (e: Exception) {
                     Log.e(kTag, "Insert notice failed", e)
                 }
-            }
-        }
-    }
-
-    private fun handleRemoteCommand(pkg: String, notice: String) {
-        if (pkg in auxiliaryApp) {
-            when {
-                notice.contains("执行任务") -> {
-                    EventBus.getDefault().post(ApplicationEvent.StartDailyTask)
-                }
-
-                notice.contains("终止任务") -> {
-                    EventBus.getDefault().post(ApplicationEvent.StopDailyTask)
-                }
-
-                notice.contains("开启循环") -> {
-                    SaveKeyValues.putValue(Constant.TASK_AUTO_START_KEY, true)
-                    sendChannelMessage("循环任务状态通知", "循环任务状态已更新为：开启")
-                }
-
-                notice.contains("关闭循环") -> {
-                    SaveKeyValues.putValue(Constant.TASK_AUTO_START_KEY, false)
-                    sendChannelMessage("循环任务状态通知", "循环任务状态已更新为：关闭")
-                }
-
-                notice.contains("息屏") -> {
-                    EventBus.getDefault().post(ApplicationEvent.ShowMaskView)
-                }
-
-                notice.contains("亮屏") -> {
-                    EventBus.getDefault().post(ApplicationEvent.HideMaskView)
-                }
-
-                notice.contains("考勤记录") -> {
-                    serviceScope.launch {
-                        val notices = try {
-                            DatabaseWrapper.loadCurrentDayNotice()
-                        } catch (e: Exception) {
-                            Log.e(kTag, "Load notices failed", e)
-                            emptyList()
-                        }
-
-                        val record = buildString {
-                            var index = 1
-                            notices.filter {
-                                it.noticeMessage.contains("考勤打卡")
-                            }.forEach {
-                                append("【第${index}次】${it.noticeMessage}，时间：${it.postTime}\r\n")
-                                index++
-                            }
-                        }
-
-                        withContext(Dispatchers.Main) {
-                            sendChannelMessage("当天考勤记录通知", record)
-                        }
-                    }
-                }
-
-                notice.contains("状态查询") -> {
-                    val type = SaveKeyValues.getValue(Constant.CHANNEL_TYPE_KEY, 0) as Int
-                    val content = buildString {
-                        appendLine("任务状态：${if (MainActivity.isTaskStarted) "运行中" else "已停止"}")
-                        appendLine("悬浮权限：${if (MainActivity.isCanDrawOverlay) "已获取" else "被拒绝"}")
-                        appendLine("通知监听：${if (listenerConnected) "正常" else "断开"}")
-                        appendLine("截图服务：${if (ProjectionSession.isStateActive()) "正常" else "断开"}")
-                        append("消息渠道：${if (type == 0) "企业微信" else "QQ邮箱"}")
-                    }
-                    sendChannelMessage("状态查询通知", content)
-                }
-
-                notice.contains("截屏") -> {
-                    if (ProjectionSession.isStateActive()) {
-                        openApplication()
-                    } else {
-                        sendChannelMessage("截屏状态通知", "截屏服务已断开，截屏失败")
-                    }
-                }
-
-                else -> {
-                    val key = SaveKeyValues.getValue(Constant.TASK_COMMAND_KEY, "打卡") as String
-                    if (notice.contains(key)) {
-                        openApplication(true)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun sendChannelMessage(title: String, content: String) {
-        val type = SaveKeyValues.getValue(Constant.CHANNEL_TYPE_KEY, 0) as Int
-        when (type) {
-            0 -> {
-                // 企业微信
-                httpRequestManager.sendMessage(title, content)
-            }
-
-            1 -> {
-                // QQ邮箱
-                emailManager.sendEmail(title, content, false)
-            }
-
-            2 -> {
-                // 飞书
-                httpRequestManager.sendFeishuMessage(title, content)
-            }
-
-            else -> {
-                Log.d(kTag, "sendChannelMessage: 消息渠道不支持")
             }
         }
     }

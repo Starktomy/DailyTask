@@ -58,4 +58,9 @@ sealed class ApplicationEvent {
      * 中国节假日数据状态变化事件
      */
     object HolidayDataStatusChanged : ApplicationEvent()
+
+    /**
+     * 飞书远程控制状态变化事件
+     */
+    data class FeishuControlStatusChanged(val enabled: Boolean) : ApplicationEvent()
 }

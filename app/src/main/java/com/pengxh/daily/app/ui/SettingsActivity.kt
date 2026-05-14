@@ -331,6 +331,59 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             SaveKeyValues.putValue(Constant.LOW_BATTERY_REMINDER_KEY, isChecked)
         }
 
+        binding.feishuControlLayout.setOnClickListener {
+            val appId = SaveKeyValues.getValue(Constant.FEISHU_APP_ID_KEY, "") as String
+            val appSecret = SaveKeyValues.getValue(Constant.FEISHU_APP_SECRET_KEY, "") as String
+            
+            // 使用两个对话框分别配置，或者您可以后续扩充为一个完整的配置页面
+            com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.Builder()
+                .setContext(this)
+                .setTitle("配置飞书 App ID")
+                .setHint("请输入机器人的 App ID")
+                .setNegativeButton("取消")
+                .setPositiveButton("下一步")
+                .setOnDialogButtonClickListener(object :
+                    com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.OnDialogButtonClickListener {
+                    override fun onConfirmClick(id: String) {
+                        SaveKeyValues.putValue(Constant.FEISHU_APP_ID_KEY, id.trim())
+                        
+                        // 弹出第二个对话框输入 Secret
+                        com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.Builder()
+                            .setContext(context)
+                            .setTitle("配置飞书 App Secret")
+                            .setHint("请输入机器人的 App Secret")
+                            .setNegativeButton("取消")
+                            .setPositiveButton("确定")
+                            .setOnDialogButtonClickListener(object :
+                                com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.OnDialogButtonClickListener {
+                                override fun onConfirmClick(secret: String) {
+                                    SaveKeyValues.putValue(Constant.FEISHU_APP_SECRET_KEY, secret.trim())
+                                    "配置已保存".show(context)
+                                }
+                                override fun onCancelClick() {}
+                            }).build().show()
+                    }
+                    override fun onCancelClick() {}
+                }).build().show()
+        }
+
+        binding.feishuControlSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (syncingSwitchState) {
+                return@setOnCheckedChangeListener
+            }
+            val appId = SaveKeyValues.getValue(Constant.FEISHU_APP_ID_KEY, "") as String
+            val appSecret = SaveKeyValues.getValue(Constant.FEISHU_APP_SECRET_KEY, "") as String
+            if (isChecked && (appId.isBlank() || appSecret.isBlank())) {
+                "请先完善飞书机器人配置".show(this)
+                syncingSwitchState = true
+                binding.feishuControlSwitch.isChecked = false
+                syncingSwitchState = false
+                return@setOnCheckedChangeListener
+            }
+            SaveKeyValues.putValue(Constant.FEISHU_CONTROL_ENABLE_KEY, isChecked)
+            EventBus.getDefault().post(ApplicationEvent.FeishuControlStatusChanged(isChecked))
+        }
+
         binding.introduceLayout.setOnClickListener {
             navigatePageTo<QuestionAndAnswerActivity>()
         }
@@ -421,6 +474,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 SaveKeyValues.getValue(Constant.POWER_SAVE_MODE_KEY, false) as Boolean
             binding.lowBatteryReminderSwitch.isChecked =
                 SaveKeyValues.getValue(Constant.LOW_BATTERY_REMINDER_KEY, true) as Boolean
+            binding.feishuControlSwitch.isChecked =
+                SaveKeyValues.getValue(Constant.FEISHU_CONTROL_ENABLE_KEY, false) as Boolean
         } finally {
             syncingSwitchState = false
         }

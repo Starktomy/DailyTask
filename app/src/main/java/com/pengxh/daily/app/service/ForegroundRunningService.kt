@@ -17,8 +17,10 @@ import com.pengxh.daily.app.utils.ApplicationEvent
 import com.pengxh.daily.app.utils.ChinaHolidayRemoteUpdater
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailManager
+import com.pengxh.daily.app.utils.FeishuBotManager
 import com.pengxh.daily.app.utils.HttpRequestManager
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.RemoteCommandHandler
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -34,6 +36,8 @@ class ForegroundRunningService : Service() {
     private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
     private val httpRequestManager by lazy { HttpRequestManager(this) }
     private val emailManager by lazy { EmailManager(this) }
+    private val remoteCommandHandler by lazy { RemoteCommandHandler(this) }
+    private val feishuBotManager by lazy { FeishuBotManager(this) }
     private var lastRemindTime = 0L
 
     override fun onCreate() {
@@ -87,6 +91,18 @@ class ForegroundRunningService : Service() {
 
         // 检查电量
         checkLowBattery()
+
+        // 启动飞书长连接
+        syncFeishuControlStatus()
+    }
+
+    private fun syncFeishuControlStatus() {
+        val enabled = SaveKeyValues.getValue(Constant.FEISHU_CONTROL_ENABLE_KEY, false) as Boolean
+        if (enabled) {
+            feishuBotManager.start()
+        } else {
+            feishuBotManager.stop()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -112,6 +128,8 @@ class ForegroundRunningService : Service() {
         if (event is ApplicationEvent.SetResetTaskTime) {
             // 重新计算并更新倒计时显示
             updateResetTimeView()
+        } else if (event is ApplicationEvent.FeishuControlStatusChanged) {
+            syncFeishuControlStatus()
         }
     }
 
@@ -192,6 +210,7 @@ class ForegroundRunningService : Service() {
         }
 
         EventBus.getDefault().unregister(this)
+        feishuBotManager.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
