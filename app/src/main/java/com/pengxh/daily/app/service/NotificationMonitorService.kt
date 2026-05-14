@@ -11,6 +11,7 @@ import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.ApplicationEvent
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.RemoteCommandHandler
 import com.pengxh.daily.app.utils.EmailManager
 import com.pengxh.daily.app.utils.HttpRequestManager
 import com.pengxh.daily.app.utils.ProjectionSession
@@ -34,7 +35,7 @@ import org.greenrobot.eventbus.EventBus
 class NotificationMonitorService : NotificationListenerService() {
 
     private val kTag = "MonitorService"
-    private val remoteCommandHandler by lazy { RemoteCommandHandler(this) }
+    private val remoteCommandHandler: RemoteCommandHandler by lazy { RemoteCommandHandler(this) }
     private val auxiliaryApp = arrayOf(Constant.WECHAT, Constant.QQ, Constant.TIM, Constant.ZFB)
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var listenerConnected = false

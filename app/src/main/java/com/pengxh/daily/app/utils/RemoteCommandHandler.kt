@@ -6,6 +6,9 @@ import android.util.Log
 import com.pengxh.daily.app.extensions.openApplication
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.ui.MainActivity
+import com.pengxh.daily.app.utils.ApplicationEvent
+import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

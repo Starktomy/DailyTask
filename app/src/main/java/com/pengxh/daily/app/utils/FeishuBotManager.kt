@@ -5,6 +5,8 @@ import android.util.Log
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.*
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -92,10 +94,7 @@ class FeishuBotManager(private val context: Context) {
             put("app_id", appId)
             put("app_secret", appSecret)
         }
-        val body = RequestBody.create(
-            MediaType.parse("application/json; charset=utf-8"),
-            json.toString()
-        )
+        val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         val request = Request.Builder()
             .url("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
             .post(body)
@@ -103,7 +102,7 @@ class FeishuBotManager(private val context: Context) {
 
         return try {
             val response = client.newCall(request).execute()
-            val resBody = response.body()?.string() ?: ""
+            val resBody = response.body?.string() ?: ""
             JSONObject(resBody).getString("tenant_access_token")
         } catch (e: Exception) {
             null
@@ -115,12 +114,12 @@ class FeishuBotManager(private val context: Context) {
         val request = Request.Builder()
             .url("https://open.feishu.cn/open-apis/event/v1/endpoint_url")
             .header("Authorization", "Bearer $token")
-            .post(RequestBody.create(null, ""))
+            .post("".toRequestBody())
             .build()
 
         return try {
             val response = client.newCall(request).execute()
-            val resBody = response.body()?.string() ?: ""
+            val resBody = response.body?.string() ?: ""
             val obj = JSONObject(resBody)
             if (obj.getInt("code") == 0) {
                 obj.getJSONObject("data").getString("url")

@@ -35,6 +35,7 @@ import com.pengxh.kt.lite.extensions.navigatePageTo
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import com.pengxh.kt.lite.widget.dialog.AlertInputDialog
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -334,35 +335,38 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         binding.feishuControlLayout.setOnClickListener {
             val appId = SaveKeyValues.getValue(Constant.FEISHU_APP_ID_KEY, "") as String
             val appSecret = SaveKeyValues.getValue(Constant.FEISHU_APP_SECRET_KEY, "") as String
-            
-            // 使用两个对话框分别配置，或者您可以后续扩充为一个完整的配置页面
-            com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.Builder()
+
+            com.pengxh.kt.lite.widget.dialog.AlertInputDialog.Builder()
                 .setContext(this)
                 .setTitle("配置飞书 App ID")
-                .setHint("请输入机器人的 App ID")
+                .setHintMessage("请输入机器人的 App ID")
                 .setNegativeButton("取消")
                 .setPositiveButton("下一步")
                 .setOnDialogButtonClickListener(object :
-                    com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.OnDialogButtonClickListener {
+                    com.pengxh.kt.lite.widget.dialog.AlertInputDialog.OnDialogButtonClickListener {
                     override fun onConfirmClick(id: String) {
                         SaveKeyValues.putValue(Constant.FEISHU_APP_ID_KEY, id.trim())
-                        
-                        // 弹出第二个对话框输入 Secret
-                        com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.Builder()
+
+                        com.pengxh.kt.lite.widget.dialog.AlertInputDialog.Builder()
                             .setContext(context)
                             .setTitle("配置飞书 App Secret")
-                            .setHint("请输入机器人的 App Secret")
+                            .setHintMessage("请输入机器人的 App Secret")
                             .setNegativeButton("取消")
                             .setPositiveButton("确定")
                             .setOnDialogButtonClickListener(object :
-                                com.pengxh.kt.lite.widget.dialog.AlertMessageDialog.OnDialogButtonClickListener {
+                                com.pengxh.kt.lite.widget.dialog.AlertInputDialog.OnDialogButtonClickListener {
                                 override fun onConfirmClick(secret: String) {
-                                    SaveKeyValues.putValue(Constant.FEISHU_APP_SECRET_KEY, secret.trim())
+                                    SaveKeyValues.putValue(
+                                        Constant.FEISHU_APP_SECRET_KEY,
+                                        secret.trim()
+                                    )
                                     "配置已保存".show(context)
                                 }
+
                                 override fun onCancelClick() {}
                             }).build().show()
                     }
+
                     override fun onCancelClick() {}
                 }).build().show()
         }

@@ -36,8 +36,8 @@ class ForegroundRunningService : Service() {
     private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
     private val httpRequestManager by lazy { HttpRequestManager(this) }
     private val emailManager by lazy { EmailManager(this) }
-    private val remoteCommandHandler by lazy { RemoteCommandHandler(this) }
-    private val feishuBotManager by lazy { FeishuBotManager(this) }
+    private val remoteCommandHandler: RemoteCommandHandler by lazy { RemoteCommandHandler(this) }
+    private val feishuBotManager: FeishuBotManager by lazy { FeishuBotManager(this) }
     private var lastRemindTime = 0L
 
     override fun onCreate() {
