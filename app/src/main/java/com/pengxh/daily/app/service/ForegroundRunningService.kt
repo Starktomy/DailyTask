@@ -177,11 +177,6 @@ class ForegroundRunningService : Service() {
     }
 
     private fun checkLowBattery() {
-        val enabled = SaveKeyValues.getValue(Constant.LOW_BATTERY_REMINDER_KEY, true) as Boolean
-        if (!enabled) {
-            return
-        }
-
         val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         if (battery < 20) {
             val currentTime = System.currentTimeMillis()
@@ -190,8 +185,9 @@ class ForegroundRunningService : Service() {
             }
 
             when (SaveKeyValues.getValue(Constant.CHANNEL_TYPE_KEY, 0) as Int) {
-                0 -> httpRequestManager.sendMessage("低电量提醒", "")
-                1 -> emailManager.sendEmail("低电量提醒", "", false)
+                0 -> httpRequestManager.sendMessage("低电量提醒", "当前手机电量已低于20%，请及时充电。")
+                1 -> emailManager.sendEmail("低电量提醒", "当前手机电量已低于20%，请及时充电。", false)
+                2 -> httpRequestManager.sendFeishuMessage("低电量提醒", "当前手机电量已低于20%，请及时充电。")
                 else -> LogFileManager.writeLog("低电量提醒未发送，消息渠道未配置，当前电量：$battery%")
             }
             lastRemindTime = currentTime

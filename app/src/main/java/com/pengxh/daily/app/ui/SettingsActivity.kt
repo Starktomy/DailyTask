@@ -65,7 +65,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             R.mipmap.ic_mobile_m3
         )
     }
-    private val channels = arrayListOf("企业微信", "QQ邮箱")
+    private val channels = arrayListOf("企业微信", "QQ邮箱", "飞书")
     private val permissionContract by lazy { ActivityResultContracts.StartActivityForResult() }
     private val notificationContract by lazy { ActivityResultContracts.StartActivityForResult() }
     private val projectionContract by lazy { ActivityResultContracts.StartActivityForResult() }

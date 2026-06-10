@@ -32,6 +32,7 @@ object Constant {
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY"
     const val LOW_BATTERY_REMINDER_KEY = "LOW_BATTERY_REMINDER_KEY"
     const val SKIP_CHINA_HOLIDAY_KEY = "SKIP_CHINA_HOLIDAY_KEY"
+    const val TASK_RUNNING_STATE_KEY = "TASK_RUNNING_STATE_KEY"
 
     // ============================================================
     // 目标应用

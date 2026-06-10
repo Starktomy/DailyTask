@@ -81,7 +81,13 @@ class RemoteCommandHandler(private val context: Context) {
                     appendLine("任务状态：${if (MainActivity.isTaskStarted) "运行中" else "已停止"}")
                     appendLine("悬浮权限：${if (MainActivity.isCanDrawOverlay) "已获取" else "被拒绝"}")
                     appendLine("截图服务：${if (ProjectionSession.isStateActive()) "正常" else "断开"}")
-                    append("消息渠道：${if (type == 0) "企业微信" else if (type == 1) "QQ邮箱" else "飞书"}")
+                    val channelName = when (type) {
+                        0 -> "企业微信"
+                        1 -> "QQ邮箱"
+                        2 -> "飞书"
+                        else -> "未配置"
+                    }
+                    append("消息渠道：$channelName")
                 }
                 sendChannelMessage("状态查询通知", content)
             }
