@@ -1,0 +1,27 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    # 每天 UTC 03:00（北京时间 11:00）
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync master with upstream master
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
+        with:
+          target_sync_branch: master
+          upstream_sync_repo: AndroidCoderPeng/DailyTask
+          upstream_sync_branch: master
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
