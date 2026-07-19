@@ -58,6 +58,8 @@ object TaskScheduler {
      * */
     private var clockInDeferred: CompletableDeferred<Unit>? = null
 
+    private var lastProcessedDate: LocalDate? = null
+
     /**
      * 由 ForegroundRunningService 调用，注入协程作用域
      */
@@ -90,6 +92,15 @@ object TaskScheduler {
 
         val tempJob = currentScope.launch {
             while (isActive) {
+                val today = LocalDate.now()
+
+                // 今天已经处理过了，不再重复
+                if (lastProcessedDate == today) {
+                    LogFileManager.writeLog("今日已处理，等待下一次重置")
+                    if (isActive) waitUntilNextReset()
+                    continue
+                }
+
                 if (shouldSkipToday()) {
                     _tipsEvent.emit(TipsEvent.Skip)
                     ForegroundRunningService.emitNotificationText("今日休息，任务已跳过")
@@ -104,6 +115,8 @@ object TaskScheduler {
                     executeSchedule(schedule)
                 }
 
+                lastProcessedDate = today
+
                 // 今天结束，睡到明天
                 if (isActive) waitUntilNextReset()
             }
@@ -112,6 +125,19 @@ object TaskScheduler {
             _isRunning.value = false
         }
         job = tempJob
+    }
+
+    /**
+     * 获取当日 flag
+     * */
+    fun getDayFlag(): String {
+        val today = LocalDate.now()
+        return when {
+            ChinaHolidayManager.isWorkday(today) -> "补班日"
+            CustomWorkdayManager.isWeekdayRestDay(today) -> "休息日"
+            ChinaHolidayManager.isHoliday(today) -> "节假日"
+            else -> "工作日"
+        }
     }
 
     /**
@@ -218,7 +244,9 @@ object TaskScheduler {
                     }
                 } else {
                     // 通知模式：无截图，纯文本提醒
-                    MessageDispatcher.sendMessage("任务执行结果通知", "任务超时，请手动检查是否打卡成功")
+                    MessageDispatcher.sendMessage(
+                        "任务执行结果通知", "任务超时，请手动检查是否打卡成功"
+                    )
                 }
             }
 
@@ -238,13 +266,22 @@ object TaskScheduler {
     }
 
     /**
+     * 调试用：非 null 时跳过真实计算，直接使用指定秒数
+     * 生产环境保持 null
+     */
+    @Volatile
+    var debugWaitSeconds: Long? = null
+
+    /**
      * 等待到下一个每日重置时间
      */
     private suspend fun waitUntilNextReset() {
         val resetHour = SaveKeyValues.loadInt(
             Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
         )
-        val waitSeconds = calculateSecondsUntilReset(resetHour)
+
+        val waitSeconds = debugWaitSeconds ?: calculateSecondsUntilReset(resetHour)
+        if (waitSeconds <= 0L) return  // 防御性代码：防止自旋
 
         LogFileManager.writeLog("等待 ${waitSeconds}s 后进入下一个任务周期")
 
@@ -252,10 +289,7 @@ object TaskScheduler {
         _tipsEvent.emit(TipsEvent.Completed)
         ForegroundRunningService.emitNotificationText("今日任务已执行完毕，等待下次任务")
 
-        if (waitSeconds > 0) {
-            // 单次挂起，零 CPU 开销
-            delay(waitSeconds * 1000L)
-        }
+        delay(waitSeconds * 1000)
     }
 
     /**
@@ -319,26 +353,26 @@ object TaskScheduler {
         if (!skipEnabled) return false
 
         val today = LocalDate.now()
-        val customWorkdays = CustomWorkdayManager.loadWorkdays()
 
-        // 法定节假日
-        if (ChinaHolidayManager.isHoliday(today)) {
-            LogFileManager.writeLog("今日为法定节假日，跳过任务")
-            return true
-        }
-
-        // 调休补班日（例外：周末但要上班）
+        // 调休补班日（覆盖一切，必须执行）
         if (ChinaHolidayManager.isWorkday(today)) {
             LogFileManager.writeLog("今日为调休补班日，正常执行任务")
             return false
         }
 
-        // 不在自定义工作日内，即为休息日
-        if (today.dayOfWeek !in customWorkdays) {
-            LogFileManager.writeLog("今日不在自定义工作日内，跳过任务")
+        // 法定节假日 → 跳过
+        if (ChinaHolidayManager.isHoliday(today)) {
+            LogFileManager.writeLog("今日为法定节假日，跳过任务")
             return true
         }
 
+        // 一周休息日（默认周六日双休，用户可修改）→ 跳过
+        if (CustomWorkdayManager.isWeekdayRestDay(today)) {
+            LogFileManager.writeLog("今日为休息日，跳过任务")
+            return true
+        }
+
+        // 其余情况 → 正常执行
         return false
     }
 
@@ -364,16 +398,15 @@ object TaskScheduler {
                     timeParts[1] * 60_000L +
                     timeParts[2] * 1_000L
             Triple(task, actualTime, actualMillis)
-        }.sortedBy { it.third }
-            .mapIndexed { index, (task, actualTime, actualMillis) ->
-                ScheduledTask(task, index + 1, task.time, actualTime, actualMillis)
-            }
+        }.sortedBy { it.third }.mapIndexed { index, (task, actualTime, actualMillis) ->
+            ScheduledTask(task, index + 1, task.time, actualTime, actualMillis)
+        }
     }
 
     /**
      * 计算距离下一次重置还有多少秒
      */
-    private fun calculateSecondsUntilReset(resetHour: Int): Int {
+    private fun calculateSecondsUntilReset(resetHour: Int): Long {
         val now = Calendar.getInstance()
         val target = now.clone() as Calendar
         target.set(Calendar.HOUR_OF_DAY, resetHour)
@@ -385,7 +418,7 @@ object TaskScheduler {
             target.add(Calendar.DATE, 1)
         }
 
-        return ((target.timeInMillis - now.timeInMillis) / 1000).toInt()
+        return ((target.timeInMillis - now.timeInMillis) / 1000).coerceAtLeast(1)
     }
 
     private data class ScheduledTask(

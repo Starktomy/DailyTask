@@ -30,7 +30,6 @@ import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
-import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.FloatingWindowController
@@ -60,8 +59,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
-import java.time.DayOfWeek
-import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 
@@ -106,24 +103,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         override fun run() {
             val currentTime = dateTimeFormat.format(Date())
             val parts = currentTime.split(" ")
-            val now = LocalDate.now()
-            val flag = when {
-                // 法定节假日（如国庆、春节等，含调休放假，不含普通周末）
-                ChinaHolidayManager.isHoliday(now) -> "节假日"
-
-                // 调休补班日（如周末上班补假期）
-                ChinaHolidayManager.isWorkday(now) -> "补班日"
-
-                // 普通日期：周末/工作日
-                else -> {
-                    when (now.dayOfWeek) {
-                        DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> "休息日"
-                        else -> "工作日"
-                    }
-                }
-            }
             binding.toolbar.apply {
-                title = "${parts[2]}（$flag）"
+                title = "${parts[2]}（${TaskScheduler.getDayFlag()}）"
                 subtitle = "${parts[0]} ${parts[1]}"
             }
             mainHandler.postDelayed(this, 1000)
@@ -297,6 +278,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
                         binding.tipsView.text = "今日任务已全部执行完毕，等待下次任务"
                         binding.tipsView.setTextColor(R.color.ios_green.convertColor(this@MainActivity))
+                        LogFileManager.writeLog("今日任务已全部执行完毕")
                         MessageDispatcher.sendMessage("任务状态通知", "今日任务已全部执行完毕")
                     }
                 }
@@ -335,7 +317,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        LogFileManager.writeLog("onNewIntent: ${packageName} 回到前台")
+        LogFileManager.writeLog("onNewIntent: $packageName 回到前台")
 
         if (ProjectionSession.isStateActive()) {
             LogFileManager.writeLog("截屏服务正常：MediaProjection 有效")
