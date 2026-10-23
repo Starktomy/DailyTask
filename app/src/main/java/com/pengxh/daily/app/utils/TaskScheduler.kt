@@ -63,9 +63,13 @@ object TaskScheduler {
     /**
      * 由 ForegroundRunningService 调用，注入协程作用域
      */
-    fun attach(serviceScope: CoroutineScope) {
+    fun attach(serviceScope: CoroutineScope, resumeTask: Boolean) {
         scope?.cancel()
         scope = serviceScope
+        if (resumeTask) {
+            _isRunning.value = false
+            startTask()
+        }
     }
 
     fun isRunning(): Boolean {
@@ -76,19 +80,30 @@ object TaskScheduler {
      * 启动每日任务调度
      * 时序：防重复 → 检查协程作用域 → 判断周末/节假日 → 构建排程 → 启动核心循环
      */
-    fun startTask() {
+    fun startTask(onStarted: ((Boolean) -> Unit)? = null): Boolean {
         if (_isRunning.value) {
             LogFileManager.writeLog("任务已在执行中，忽略重复启动")
-            return
+            onStarted?.invoke(true)
+            return true
         }
 
         val currentScope = scope
         if (currentScope == null) {
             LogFileManager.writeLog("TaskScheduler scope 未初始化")
-            return
+            onStarted?.invoke(false)
+            return false
         }
 
         _isRunning.value = true
+        SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, true)
+
+        var startReported = false
+        fun reportStart(success: Boolean) {
+            if (!startReported) {
+                startReported = true
+                onStarted?.invoke(success)
+            }
+        }
 
         val tempJob = currentScope.launch {
             while (isActive) {
@@ -96,12 +111,14 @@ object TaskScheduler {
 
                 // 今天已经处理过了，不再重复
                 if (lastProcessedDate == today) {
+                    reportStart(true)
                     LogFileManager.writeLog("今日已处理，等待下一次重置")
                     if (isActive) waitUntilNextReset()
                     continue
                 }
 
                 if (shouldSkipToday()) {
+                    reportStart(true)
                     _tipsEvent.emit(TipsEvent.Skip)
                     ForegroundRunningService.emitNotificationText("今日休息，任务已跳过")
                 } else {
@@ -111,6 +128,7 @@ object TaskScheduler {
                         return@launch
                     }
 
+                    reportStart(true)
                     LogFileManager.writeLog("开始执行每日任务，共 ${schedule.size} 个")
                     executeSchedule(schedule)
                 }
@@ -121,10 +139,16 @@ object TaskScheduler {
                 if (isActive) waitUntilNextReset()
             }
         }
-        tempJob.invokeOnCompletion {
-            _isRunning.value = false
-        }
         job = tempJob
+        tempJob.invokeOnCompletion {
+            if (job === tempJob) {
+                job = null
+                _isRunning.value = false
+                SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
+            }
+            reportStart(false)
+        }
+        return true
     }
 
     /**
@@ -272,24 +296,38 @@ object TaskScheduler {
     @Volatile
     var debugWaitSeconds: Long? = null
 
+    private const val RESET_CONFIG_CHECK_INTERVAL_SECONDS = 10 * 60L
+
     /**
      * 等待到下一个每日重置时间
      */
     private suspend fun waitUntilNextReset() {
-        val resetHour = SaveKeyValues.loadInt(
+        debugWaitSeconds?.let {
+            delay(it * 1000)
+            return
+        }
+
+        val initialResetHour = SaveKeyValues.loadInt(
             Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
         )
-
-        val waitSeconds = debugWaitSeconds ?: calculateSecondsUntilReset(resetHour)
-        if (waitSeconds <= 0L) return  // 防御性代码：防止自旋
-
-        LogFileManager.writeLog("等待 ${waitSeconds}s 后进入下一个任务周期")
+        val initialWaitSeconds = calculateSecondsUntilReset(initialResetHour)
+        LogFileManager.writeLog("等待 ${initialWaitSeconds}s 后进入下一个任务周期")
 
         // 只发一次静态通知，不每秒刷新
         _tipsEvent.emit(TipsEvent.Completed)
         ForegroundRunningService.emitNotificationText("今日任务已执行完毕，等待下次任务")
 
-        delay(waitSeconds * 1000)
+        while (true) {
+            val resetHour = SaveKeyValues.loadInt(
+                Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
+            )
+            val waitSeconds = calculateSecondsUntilReset(resetHour)
+            val delaySeconds = minOf(waitSeconds, RESET_CONFIG_CHECK_INTERVAL_SECONDS)
+            delay(delaySeconds * 1000)
+            if (delaySeconds == waitSeconds) {
+                return
+            }
+        }
     }
 
     /**
@@ -313,6 +351,7 @@ object TaskScheduler {
         job?.cancel()
         job = null
         _isRunning.value = false
+        SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
         ForegroundRunningService.emitNotificationText("为保证程序正常运行，请勿移除此通知")
     }
 
@@ -329,6 +368,7 @@ object TaskScheduler {
         job?.cancel()
         job = null
         _isRunning.value = false
+        SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
     }
 
     /**

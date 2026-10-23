@@ -561,6 +561,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                     DatabaseWrapper.loadAllTask()
                 }
                 dailyTaskAdapter.refresh(taskBeans)
+                checkMissedReset()
                 dialog.dismiss()
             }
         }
@@ -591,6 +592,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                                     dailyTaskAdapter.refresh(taskBeans)
                                     binding.recyclerView.visibility = View.VISIBLE
                                     binding.emptyView.visibility = View.GONE
+                                    ForegroundRunningService.emitResetTaskTime()
+                                    checkMissedReset()
                                 }
                                 "任务导入成功".show(context)
                             }
@@ -664,10 +667,12 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
         // 今天还未重置，执行重置（覆盖 Alarm 未触发的场景）
         LogFileManager.writeLog("检测到今日尚未重置，执行重置操作")
-        SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
-
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
-            TaskScheduler.startTask()
+            TaskScheduler.startTask { started ->
+                if (started) {
+                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+                }
+            }
         }
     }
 
