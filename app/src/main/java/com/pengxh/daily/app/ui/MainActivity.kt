@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
@@ -24,7 +23,6 @@ import com.pengxh.daily.app.R
 import com.pengxh.daily.app.adapter.DailyTaskAdapter
 import com.pengxh.daily.app.databinding.ActivityMainBinding
 import com.pengxh.daily.app.extensions.convertToTimeEntity
-import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.NotificationMonitorService
@@ -32,7 +30,6 @@ import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
-import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.GestureController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskViewController
@@ -78,7 +75,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         WindowCompat.getInsetsController(window, binding.rootView)
     }
     private val maskViewController by lazy { MaskViewController(this, binding, insetsController) }
-    private val gestureController by lazy { GestureController(this, maskViewController) }
+    private val gestureController by lazy {
+        GestureController(this, maskViewController, ::saveMaskMode)
+    }
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     private var taskBeans = mutableListOf<DailyTaskBean>()
@@ -254,10 +253,12 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             TaskScheduler.tipsEvent.collectLatest { event ->
                 when (event) {
                     is TipsEvent.Skip -> {
-                        binding.tipsView.text = "今日为周末，跳过任务"
+                        val reason = "今日为${event.dayFlag.label}"
+                        binding.tipsView.text = "$reason，跳过任务"
                         binding.tipsView.setTextColor(R.color.ios_green.convertColor(this@MainActivity))
                         MessageDispatcher.sendMessage(
-                            "任务跳过通知", "当前为节假日，任务已自动跳过，请注意下次打卡时间"
+                            "任务跳过通知",
+                            "$reason，任务已自动跳过，请注意下次打卡时间"
                         )
                     }
 
@@ -276,10 +277,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
                     is TipsEvent.Completed -> {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
-                        binding.tipsView.text = "今日任务已全部执行完毕，等待下次任务"
-                        binding.tipsView.setTextColor(R.color.ios_green.convertColor(this@MainActivity))
-                        LogFileManager.writeLog("今日任务已全部执行完毕")
-                        MessageDispatcher.sendMessage("任务状态通知", "今日任务已全部执行完毕")
+                        val message = event.message ?: "今日任务已全部执行完毕"
+                        binding.tipsView.text = "$message，等待下次任务"
+                        val statusColor =
+                            if (event.message?.contains("失败") == true) R.color.red else R.color.ios_green
+                        binding.tipsView.setTextColor(statusColor.convertColor(this@MainActivity))
+                        LogFileManager.writeLog(message)
+                        MessageDispatcher.sendMessage("任务状态通知", message)
                     }
                 }
             }
@@ -313,6 +317,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         if (!Settings.canDrawOverlays(this)) {
             "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
         }
+        showMaskOnForeground()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -329,9 +334,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
         }
 
-        if (!maskViewController.isMaskVisible()) {
-            maskViewController.showMaskView()
-        }
+        // 回到前台无条件显示蒙层（省电），与任务是否开启无关
+        showMaskOnForeground()
     }
 
     override fun onDestroy() {
@@ -350,94 +354,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private fun handleMonitorEvent(event: MonitorEvent) {
         when (event) {
             is MonitorEvent.ClockInSuccess -> {
-                TaskScheduler.notifyClockIn() // 通知 TaskScheduler：打卡成功，取消超时等待分支
                 backToMainActivity()
             }
 
-            is MonitorEvent.StartTaskCommand -> {
-                if (!TaskScheduler.isRunning()) {
-                    TaskScheduler.startTask()
-                }
-            }
-
-            is MonitorEvent.StopTaskCommand -> doStopTask()
-
             is MonitorEvent.ShowMaskCommand -> {
-                if (!maskViewController.isMaskVisible()) {
-                    maskViewController.showMaskView()
-                }
+                setMaskVisible(true)
             }
 
             is MonitorEvent.HideMaskCommand -> {
-                if (maskViewController.isMaskVisible()) {
-                    maskViewController.hideMaskView()
-                }
+                setMaskVisible(false)
             }
 
-            is MonitorEvent.AppOpenedForScreenshot -> {
-                captureTargetAppAndReturn(
-                    countdownSeconds = 10,
-                    messageTitle = "截屏状态通知",
-                    successMessage = "截图完成",
-                    failureMessage = "截图完成，但是无法获取截图"
-                )
-            }
-
-            is MonitorEvent.AppOpenedForRemoteClockIn -> {
-                if (event.returnScreenshot) {
-                    captureTargetAppAndReturn(
-                        countdownSeconds = event.countdownSeconds,
-                        messageTitle = "打卡结果通知",
-                        successMessage = "打卡完成，结果见附件",
-                        failureMessage = "打卡完成，但是无法获取截图"
-                    )
-                } else {
-                    returnAfterCountdown(event.countdownSeconds)
-                }
-            }
-        }
-    }
-
-    private fun returnAfterCountdown(countdownSeconds: Int) {
-        lifecycleScope.launch {
-            countdownTargetApp(countdownSeconds)
-            backToMainActivity()
-        }
-    }
-
-    /**
-     * 远程截屏与远程打卡的公共流程：倒计时 → 截屏 → 返回 → 发送结果。
-     */
-    private fun captureTargetAppAndReturn(
-        countdownSeconds: Int,
-        messageTitle: String,
-        successMessage: String,
-        failureMessage: String
-    ) {
-        lifecycleScope.launch {
-            countdownTargetApp(countdownSeconds)
-
-            // 在返回前等待截屏结果，避免 Activity 生命周期变化导致结果丢失。
-            val imagePath = CaptureImageService.requestCaptureScreen().await()
-            backToMainActivity()
-
-            if (imagePath.isNullOrEmpty()) {
-                MessageDispatcher.sendMessage(messageTitle, failureMessage)
-            } else {
-                MessageDispatcher.sendAttachmentMessage(
-                    messageTitle, successMessage, imagePath
-                )
-            }
-        }
-    }
-
-    private suspend fun countdownTargetApp(countdownSeconds: Int) {
-        val countdownTarget = SystemClock.elapsedRealtime() + countdownSeconds * 1000L
-        while (true) {
-            val remaining = countdownTarget - SystemClock.elapsedRealtime()
-            if (remaining <= 0) break
-            FloatingWindowController.updateTime((remaining / 1000).toInt())
-            delay(minOf(1000L, remaining).coerceAtLeast(1))
+            is MonitorEvent.ReturnToApp -> backToMainActivity()
         }
     }
 
@@ -595,7 +523,17 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                                     ForegroundRunningService.emitResetTaskTime()
                                     checkMissedReset()
                                 }
-                                "任务导入成功".show(context)
+                                if (result.warnings.isEmpty()) {
+                                    "任务导入成功".show(context)
+                                } else {
+                                    MaterialAlertDialogBuilder(this@MainActivity)
+                                        .setTitle("导入完成")
+                                        .setMessage(
+                                            "任务导入成功\n\n${result.warnings.joinToString("\n")}"
+                                        )
+                                        .setPositiveButton("知道了", null)
+                                        .show()
+                                }
                             }
 
                             is TaskDataManager.ImportResult.Error -> {
@@ -611,14 +549,37 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            if (maskViewController.isMaskVisible()) {
-                maskViewController.hideMaskView()
-            } else {
-                maskViewController.showMaskView()
-            }
+            val maskVisible = !maskViewController.isMaskVisible()
+            setMaskVisible(maskVisible)
             return true
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    /**
+     * 回到前台一律显示蒙层（省电）：
+     * 1. 不依赖 REMOTE_MASK_MODE_KEY 历史存档，避免上次手动退出蒙层后，再次回前台蒙层不显示
+     * 2. 与任务是否开启无关
+     * 3. 延迟到窗口就绪后执行，保证隐藏系统栏、降低亮度等操作生效
+     * 4. 用户仍可通过上滑手势或者音量下键退出蒙层
+     * */
+    private fun showMaskOnForeground() {
+        window.decorView.post { setMaskVisible(true) }
+    }
+
+    private fun setMaskVisible(visible: Boolean) {
+        saveMaskMode(visible)
+        if (visible && !maskViewController.isMaskVisible()) {
+            maskViewController.showMaskView()
+        } else if (!visible && maskViewController.isMaskVisible()) {
+            maskViewController.hideMaskView()
+        }
+    }
+
+    private fun saveMaskMode(visible: Boolean) {
+        SaveKeyValues.saveInt(
+            Constant.REMOTE_MASK_MODE_KEY, if (visible) 1 else 0
+        )
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
@@ -668,11 +629,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 今天还未重置，执行重置（覆盖 Alarm 未触发的场景）
         LogFileManager.writeLog("检测到今日尚未重置，执行重置操作")
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
-            TaskScheduler.startTask { started ->
-                if (started) {
-                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
-                }
-            }
+            TaskScheduler.startTask()
         }
     }
 

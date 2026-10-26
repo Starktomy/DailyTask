@@ -68,7 +68,7 @@ class ForegroundRunningService : Service() {
         }
     }
 
-    private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
+    private val batteryManager: BatteryManager? by lazy { getSystemService(BatteryManager::class.java) }
     private var lastRemindTime = 0L
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -78,8 +78,15 @@ class ForegroundRunningService : Service() {
     override fun onCreate() {
         super.onCreate()
         // 注入协程作用域给 TaskScheduler
+        // 恢复判断必须与 checkAndTriggerReset 对齐：
+        //  - 仍在运行则恢复；
+        //  - 或"曾运行 且 今天尚未跑完 且 允许自动循环"才恢复。
+        // 否则会出现两类冗余：关掉循环开关后仍被强行恢复、或当天已跑完又被整体重跑一遍。
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
         val shouldResumeTask = TaskScheduler.isRunning() ||
-                SaveKeyValues.loadBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
+                (SaveKeyValues.loadBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
+                        && SaveKeyValues.loadString(Constant.LAST_RESET_DATE_KEY, "") != today
+                        && SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true))
         TaskScheduler.attach(serviceScope, shouldResumeTask)
         checkAndTriggerReset()
         DailyResetAlarmScheduler.schedule(this)
@@ -129,6 +136,7 @@ class ForegroundRunningService : Service() {
             resetTaskTime.collect {
                 updateResetTimeView()
                 DailyResetAlarmScheduler.schedule(this@ForegroundRunningService)
+                TaskScheduler.notifyResetWaiters()
             }
         }
 
@@ -213,14 +221,18 @@ class ForegroundRunningService : Service() {
     }
 
     private fun checkLowBattery() {
-        val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val battery = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            ?: return  // 读不到电量就不提醒，绝不抛异常，避免前台服务启动失败
         if (battery < 20) {
             val currentTime = System.currentTimeMillis()
             if (currentTime - lastRemindTime < 5 * 60 * 1000) {
                 return
             }
 
-            MessageDispatcher.sendMessage("低电量提醒", "手机电量低于20%，请及时充电")
+            MessageDispatcher.sendMessage(
+                "低电量提醒", "手机电量低于20%，请及时充电",
+                onFailure = { emitNotificationText("低电量提醒发送失败：$it") }
+            )
             lastRemindTime = currentTime
         } else {
             // 电量恢复到20%以上，重置提醒时间
@@ -242,11 +254,7 @@ class ForegroundRunningService : Service() {
         }
 
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
-            TaskScheduler.startTask { started ->
-                if (started) {
-                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
-                }
-            }
+            TaskScheduler.startTask()
         }
     }
 

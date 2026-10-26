@@ -263,7 +263,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
         binding.updateHolidayLayout.setOnClickListener {
             LoadingDialog.show(this, "更新中，请稍后...")
-            ChinaHolidayManager.updateChinaHolidayData()
+            ChinaHolidayManager.updateChinaHolidayData(forceRefresh = true)
         }
 
         binding.floatingSwitch.setOnClickListener {
@@ -320,7 +320,11 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             // 触发截屏并等待截屏结果
             lifecycleScope.launch {
                 val imagePath = CaptureImageService.requestCaptureScreen().await()
-                if (imagePath.isNullOrEmpty()) {
+                if (imagePath == null) {
+                    "截屏请求超时，请重试".show(context)
+                    return@launch
+                }
+                if (imagePath.isEmpty()) {
                     "截图失败，无法获取图像".show(context)
                     return@launch
                 }
@@ -358,6 +362,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 return@setOnCheckedChangeListener
             }
             SaveKeyValues.saveBoolean(Constant.POWER_SAVE_MODE_KEY, isChecked)
+            FloatingWindowService.notifyPowerSaveModeChanged()
         }
 
         binding.remoteClockInCaptureSwitch.setOnCheckedChangeListener { _, isChecked ->
