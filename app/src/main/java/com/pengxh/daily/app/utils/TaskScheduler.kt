@@ -10,7 +10,6 @@ import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
-import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -37,9 +36,9 @@ import java.util.Calendar
  * 任务调度器
  */
 object TaskScheduler {
-    /**
-     * 调度器是否在运行中
-     * */
+    // 单个任务的执行结果
+    private enum class TaskOutcome { SUCCESS, TIMEOUT, STOPPED }
+
     private val _isRunning = MutableStateFlow(false)
     val isRunning = _isRunning.asStateFlow()
 
@@ -71,10 +70,10 @@ object TaskScheduler {
     private var lastProcessedDate: LocalDate? = null
     private val resetWaitWakeupChannel = Channel<Unit>(Channel.CONFLATED)
 
-    /** 单次异常后最大自动重试次数，超过则彻底停止并告警，避免永久性错误疯狂重试 */
+    // 单次异常后最大自动重试次数，超过则彻底停止并告警，避免永久性错误疯狂重试
     private const val MAX_AUTO_RECOVERY_COUNT = 3
 
-    /** 异常重试退避时长，给外部条件（网络/数据库/投影服务）恢复的时间 */
+    // 异常重试退避时长，给外部条件（网络/数据库/投影服务）恢复的时间
     private const val AUTO_RECOVERY_DELAY_MILLIS = 30_000L
 
     fun notifyResetWaiters() {
@@ -116,7 +115,7 @@ object TaskScheduler {
         }
 
         _isRunning.value = true
-        SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, true)
+        AppConfig.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, true)
 
         var startReported = false
         fun reportStart(success: Boolean) {
@@ -146,12 +145,12 @@ object TaskScheduler {
                         continue
                     }
 
-                    var completionMessage: String? = null
+                    var completionMessage: String?
                     var emitCompletionEvent = true
                     val skipReason = getTodaySkipReason()
                     if (skipReason != null) {
                         reportStart(true)
-                        _tipsEvent.emit(TipsEvent.Skip(skipReason))
+                        _tipsEvent.tryEmit(TipsEvent.Skip(skipReason))
                         completionMessage = "今日为${skipReason.label}，任务已跳过"
                         ForegroundRunningService.emitNotificationText(completionMessage)
                         emitCompletionEvent = false
@@ -168,7 +167,7 @@ object TaskScheduler {
                     }
 
                     lastProcessedDate = today
-                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today.toString())
+                    AppConfig.saveString(Constant.LAST_RESET_DATE_KEY, today.toString())
 
                     // 今天结束，睡到明天
                     if (isActive) waitUntilNextReset(completionMessage, emitCompletionEvent)
@@ -204,7 +203,7 @@ object TaskScheduler {
             if (job === tempJob) {
                 job = null
                 _isRunning.value = false
-                SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
+                AppConfig.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
             }
             reportStart(false)
         }
@@ -246,7 +245,7 @@ object TaskScheduler {
 
             // 非钉钉目标仅支持截屏来源，投影失效则剩余任务均无法获取打卡结果，跳过并说明根因
             if (Constant.getTargetApp() != Constant.DING_DING &&
-                SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX) != 1
+                AppConfig.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX) != 1
             ) {
                 val remainingCount = schedule.size - task.displayIndex + 1
                 skippedCount += remainingCount
@@ -263,7 +262,7 @@ object TaskScheduler {
 
             // ====== 阶段 1：倒计时等待 ======
             val delayMs = task.actualTimeMillis - now
-            _tipsEvent.emit(
+            _tipsEvent.tryEmit(
                 TipsEvent.Executing(
                     task.displayIndex,
                     schedule.size,
@@ -292,91 +291,111 @@ object TaskScheduler {
             }
 
             // ====== 阶段 2：打开目标 App，等待打卡或超时 ======
-            val timeoutSeconds = SaveKeyValues.loadInt(
+            val timeoutSeconds = AppConfig.loadInt(
                 Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
             )
 
-            // Kotlin语法糖——竞态保护：select 只取先完成的分支，另一个自动取消
+            // 竞态保护：select 只取先完成的分支，另一个自动取消
             var hasCaptured = false
             var captureDeferred: CompletableDeferred<String?>? = null
             val clockInSignal = CompletableDeferred<Unit>()
-            clockInWaitStartedAtMillis = System.currentTimeMillis()
-            clockInWaitDeadlineMillis = null
-            clockInDeferred = clockInSignal
             var timeoutJob: Job? = null
-            val clockInSuccess = try {
-                if (!DailyTaskApplication.get().openApplication()) {
-                    requestStopDueToError("无法打开目标应用，任务已停止")
-                    return null
-                }
-                clockInWaitDeadlineMillis =
-                    System.currentTimeMillis() + timeoutSeconds * 1000L
+            val schedulerScope = this
 
-                val activeTimeoutJob = launch {
-                    updateCountdownWithNotification(timeoutSeconds * 1000L) { remaining ->
-                        val tick = (remaining / 1000).toInt()
-                        FloatingWindowController.updateTime(tick)
+            // 设备执行权：同一时刻只允许一条流程驱动目标 App/悬浮窗/截屏。
+            // 谁先到谁先执行，后到的排队等待（互斥，不抢占）。
+            val outcome = AutomationGate.withDevice(AutomationGate.Owner.SCHEDULED) {
+                clockInWaitStartedAtMillis = System.currentTimeMillis()
+                clockInWaitDeadlineMillis = null
+                clockInDeferred = clockInSignal
+                var result = TaskOutcome.TIMEOUT
+                try {
+                    if (!DailyTaskApplication.get().openApplication()) {
+                        requestStopDueToError("无法打开目标应用，任务已停止")
+                        result = TaskOutcome.STOPPED
+                    } else {
+                        clockInWaitDeadlineMillis =
+                            System.currentTimeMillis() + timeoutSeconds * 1000L
 
-                        // 最后 5 秒兜底截屏（只触发一次）
-                        if (timeoutSeconds > 5 && tick <= 5 && !hasCaptured) {
-                            val resultSource = SaveKeyValues.loadInt(
-                                Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
-                            )
-                            if (resultSource == 1) {
-                                hasCaptured = true
-                                captureDeferred = CaptureImageService.requestCaptureScreen()
+                        val activeTimeoutJob = schedulerScope.launch {
+                            updateCountdownWithNotification(timeoutSeconds * 1000L) { remaining ->
+                                val tick = (remaining / 1000).toInt()
+                                FloatingWindowController.updateTime(tick)
+
+                                // 最后 5 秒兜底截屏（只触发一次）
+                                if (timeoutSeconds > 5 && tick <= 5 && !hasCaptured) {
+                                    val resultSource = AppConfig.loadInt(
+                                        Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
+                                    )
+                                    if (resultSource == 1) {
+                                        hasCaptured = true
+                                        captureDeferred = CaptureImageService.requestCaptureScreen()
+                                    }
+                                }
                             }
                         }
+                        timeoutJob = activeTimeoutJob
+
+                        result = select {
+                            // 分支 A：超时
+                            activeTimeoutJob.onJoin { TaskOutcome.TIMEOUT }
+
+                            // 分支 B：打卡成功
+                            clockInSignal.onAwait { TaskOutcome.SUCCESS }
+                        }
+                    }
+                } finally {
+                    timeoutJob?.cancel()
+                    if (clockInDeferred === clockInSignal) {
+                        clockInDeferred = null
+                        clockInWaitStartedAtMillis = null
+                        clockInWaitDeadlineMillis = null
                     }
                 }
-                timeoutJob = activeTimeoutJob
 
-                select {
-                    // 分支 A：超时
-                    activeTimeoutJob.onJoin { false }
+                // 超时路径——打卡失败，回到主页 + 兜底通知 + 继续下一个任务
+                // （在执行权内完成，避免与远程指令抢同一帧）
+                if (result == TaskOutcome.TIMEOUT) {
+                    _returnToApp.tryEmit(Unit)
 
-                    // 分支 B：打卡成功
-                    clockInSignal.onAwait { true }
+                    // 发送兜底截图给用户
+                    if (hasCaptured) {
+                        // Deferred 内部已有 5s 超时兜底，await() 不会无限挂起
+                        when (val imagePath = captureDeferred?.await()) {
+                            null -> MessageDispatcher.sendMessage(
+                                "任务执行结果通知", "截屏请求超时，无法获取截图"
+                            )
+
+                            "" -> MessageDispatcher.sendMessage(
+                                "任务执行结果通知", "截屏失败，无法获取图像"
+                            )
+
+                            else -> MessageDispatcher.sendAttachmentMessage(
+                                "任务执行结果通知", "任务执行结果见附件", imagePath
+                            )
+                        }
+                    } else {
+                        // 通知模式：无截图，纯文本提醒
+                        // 期间若有远程打卡指令，本次未监听到成功属正常（已被指令代打卡）
+                        val remoteHint = if (AutomationGate.hasRecentRemoteClockIn()) {
+                            "（由远程打卡指令处理），请以指令结果为准"
+                        } else {
+                            "，请手动检查是否打卡成功"
+                        }
+                        MessageDispatcher.sendMessage(
+                            "任务执行结果通知", "本次任务未监听到打卡成功$remoteHint"
+                        )
+                    }
                 }
-            } finally {
-                timeoutJob?.cancel()
-                if (clockInDeferred === clockInSignal) {
-                    clockInDeferred = null
-                    clockInWaitStartedAtMillis = null
-                    clockInWaitDeadlineMillis = null
-                }
+                result
             }
 
-            // 超时路径——打卡失败，回到主页 + 兜底通知 + 继续下一个任务
-            if (!clockInSuccess) {
-                _returnToApp.emit(Unit)
-
-                // 发送兜底截图给用户
-                if (hasCaptured) {
-                    // Deferred 内部已有 5s 超时兜底，await() 不会无限挂起
-                    when (val imagePath = captureDeferred?.await()) {
-                        null -> MessageDispatcher.sendMessage(
-                            "任务执行结果通知", "截屏请求超时，无法获取截图"
-                        )
-
-                        "" -> MessageDispatcher.sendMessage(
-                            "任务执行结果通知", "截屏失败，无法获取图像"
-                        )
-
-                        else -> MessageDispatcher.sendAttachmentMessage(
-                            "任务执行结果通知", "任务执行结果见附件", imagePath
-                        )
-                    }
-                } else {
-                    // 通知模式：无截图，纯文本提醒
-                    MessageDispatcher.sendMessage(
-                        "任务执行结果通知", "任务超时，请手动检查是否打卡成功"
-                    )
-                }
+            if (outcome == TaskOutcome.STOPPED) {
+                return null
             }
 
             // ====== 阶段 3：回到主界面，处理结果 ======
-            if (clockInSuccess) {
+            if (outcome == TaskOutcome.SUCCESS) {
                 successCount++
             } else {
                 failureCount++
@@ -420,7 +439,7 @@ object TaskScheduler {
             return
         }
 
-        val initialResetHour = SaveKeyValues.loadInt(
+        val initialResetHour = AppConfig.loadInt(
             Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
         )
         val initialTargetMillis = nextResetTimeMillis(initialResetHour)
@@ -430,7 +449,7 @@ object TaskScheduler {
 
         // 只发一次静态通知，不每秒刷新
         if (emitCompletionEvent) {
-            _tipsEvent.emit(TipsEvent.Completed(completionMessage))
+            _tipsEvent.tryEmit(TipsEvent.Completed(completionMessage))
         }
         ForegroundRunningService.emitNotificationText(
             "${completionMessage ?: "今日任务已全部执行完毕"}，等待下次任务"
@@ -440,7 +459,7 @@ object TaskScheduler {
         var targetMillis = initialTargetMillis
         var alarmScheduledForHour: Int? = null
         while (true) {
-            val resetHour = SaveKeyValues.loadInt(
+            val resetHour = AppConfig.loadInt(
                 Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
             )
             if (resetHour != targetResetHour) {
@@ -457,7 +476,7 @@ object TaskScheduler {
                 resetWaitWakeupChannel.receive()
             }
 
-            val currentResetHour = SaveKeyValues.loadInt(
+            val currentResetHour = AppConfig.loadInt(
                 Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
             )
             if (currentResetHour != resetHour) {
@@ -483,6 +502,11 @@ object TaskScheduler {
             LogFileManager.writeLog("忽略等待窗口外的打卡成功通知：$postedAtMillis")
             return false
         }
+        // 远程打卡指令已代打卡：其"成功"通知不计入定时任务
+        if (AutomationGate.belongsToRemoteDrive(postedAtMillis)) {
+            LogFileManager.writeLog("忽略远程打卡指令产生的成功通知：$postedAtMillis")
+            return false
+        }
         return signal.complete(Unit)
     }
 
@@ -496,7 +520,7 @@ object TaskScheduler {
         job?.cancel()
         job = null
         _isRunning.value = false
-        SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
+        AppConfig.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
         ForegroundRunningService.emitNotificationText("为保证程序正常运行，请勿移除此通知")
     }
 
@@ -543,7 +567,7 @@ object TaskScheduler {
         job?.cancel()
         job = null
         _isRunning.value = false
-        SaveKeyValues.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
+        AppConfig.saveBoolean(Constant.TASK_SCHEDULER_RUNNING_KEY, false)
         if (shouldNotify) {
             ForegroundRunningService.emitNotificationText(reason)
             MessageDispatcher.sendMessage("任务停止通知", reason)
@@ -570,7 +594,7 @@ object TaskScheduler {
     }
 
     private fun getTodaySkipReason(): DayFlag? {
-        val skipEnabled = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
+        val skipEnabled = AppConfig.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
         if (!skipEnabled) return null
 
         val dayFlag = classifyDay(LocalDate.now())
@@ -628,7 +652,6 @@ object TaskScheduler {
         }
     }
 
-    /** 计算下一次每日重置的绝对时间点 */
     private fun nextResetTimeMillis(resetHour: Int): Long {
         val now = Calendar.getInstance()
         val target = now.clone() as Calendar
