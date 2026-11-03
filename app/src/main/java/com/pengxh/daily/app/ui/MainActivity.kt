@@ -2,7 +2,6 @@ package com.pengxh.daily.app.ui
 
 import android.content.Intent
 import android.graphics.Color
-import androidx.core.graphics.ColorUtils
 import android.os.Bundle
 import android.provider.Settings
 import android.view.KeyEvent
@@ -10,6 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -42,8 +42,6 @@ import com.pengxh.daily.app.utils.todayDateKey
 import com.pengxh.daily.app.vm.MainViewModel
 import com.pengxh.daily.app.widget.TaskTimeDialog
 import com.pengxh.kt.lite.base.KotlinBaseActivity
-import com.pengxh.kt.lite.divider.RecyclerViewItemBorder
-import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.navigatePageTo
 import com.pengxh.kt.lite.extensions.show
 import kotlinx.coroutines.delay
@@ -54,7 +52,6 @@ import java.util.Locale
 
 class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
-    private val marginOffset by lazy { 16.dp2px(this) }
     private val permissionContract = ActivityResultContracts.StartActivityForResult()
 
     private val mainViewModel: MainViewModel by viewModels()
@@ -108,8 +105,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         val today = LocalDate.now()
         binding.toolbar.title = String.format(
             Locale.CHINA,
-            "%04d年%02d月%02d日 %s（%s）",
-            today.year,
+            "%02d月%02d日 %s（%s）",
             today.monthValue,
             today.dayOfMonth,
             CustomWorkdayManager.getDayLabel(today.dayOfWeek),
@@ -118,8 +114,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun initOnCreate(savedInstanceState: Bundle?) {
-        setupWatermark()
-        setupTaskList()
+        binding.contentView.background = WatermarkDrawable(this, DailyTask.getWatermarkText())
+        binding.recyclerView.adapter = dailyTaskAdapter
+
         startCoreServices()
 
         updateResetTimeText()
@@ -140,6 +137,26 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun initEvent() {
+        binding.toolbar.setOnMenuItemClickListener { menuItem ->
+            when (menuItem.itemId) {
+                R.id.menu_add_task -> {
+                    if (TaskScheduler.isRunning()) {
+                        showTaskRunningToast("添加")
+                        return@setOnMenuItemClickListener true
+                    }
+
+                    TaskTimeDialog.show(this, "添加任务") { time ->
+                        mainViewModel.addTask(time)
+                    }
+                }
+
+                R.id.menu_settings -> MainDialogManager.showUsageNotice(this) {
+                    navigatePageTo<SettingsActivity>()
+                }
+            }
+            true
+        }
+
         binding.executeTaskButton.setOnClickListener {
             if (TaskScheduler.isRunning()) {
                 doStopTask()
@@ -154,9 +171,10 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
         }
 
-        binding.toolbar.setOnMenuItemClickListener { menuItem ->
-            onToolbarMenuClick(menuItem.itemId)
-            true
+        binding.importTaskView.setOnClickListener {
+            MainDialogManager.showImportInput(this) { json ->
+                mainViewModel.importTasks(json)
+            }
         }
     }
 
@@ -223,22 +241,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     /**
-     * 水印背景
-     * */
-    private fun setupWatermark() {
-        binding.contentView.background = WatermarkDrawable(this, DailyTask.getWatermarkText())
-    }
-
-    private fun setupTaskList() {
-        binding.recyclerView.adapter = dailyTaskAdapter
-        binding.recyclerView.addItemDecoration(
-            RecyclerViewItemBorder(
-                marginOffset, marginOffset shr 1, marginOffset, marginOffset shr 1
-            )
-        )
-    }
-
-    /**
      * 启动核心服务：悬浮窗 + 前台服务
      *
      * 前台服务负责保活、托管 TaskScheduler 协程作用域以及每日重置
@@ -254,13 +256,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
         Intent(this, ForegroundRunningService::class.java).apply { startForegroundService(this) }
     }
-
-    // ================================================================
-    // Flow 订阅
-    //
-    // 每个 lifecycleScope.launch 都是独立的协程，互斥，
-    // 不能为了省事把协程合并，否则只会执行第一个协程的业务，其他的业务被挂起
-    // ================================================================
 
     /**
      * 订阅任务列表状态 → 渲染列表与空态
@@ -467,18 +462,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             .setNegativeButton("取消", null).show()
     }
 
-    private fun createTask() {
-        TaskTimeDialog.show(this, "添加任务") { time ->
-            mainViewModel.addTask(time)
-        }
-    }
-
-    private fun importTask() {
-        MainDialogManager.showImportInput(this) { json ->
-            mainViewModel.importTasks(json)
-        }
-    }
-
     private fun handleImportSuccess(event: MainEvent.ImportSuccess) {
         if (event.count > 0) {
             ForegroundRunningService.emitResetTaskTime()
@@ -488,31 +471,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             "任务导入成功".show(this@MainActivity)
         } else {
             MainDialogManager.showImportResult(this@MainActivity, event.warnings)
-        }
-    }
-
-    private fun onToolbarMenuClick(itemId: Int) {
-        when (itemId) {
-            R.id.menu_add_task -> {
-                if (TaskScheduler.isRunning()) {
-                    showTaskRunningToast("添加")
-                    return
-                }
-
-                if (dailyTaskAdapter.itemCount > 0) {
-                    createTask()
-                } else {
-                    MainDialogManager.showAddOrImportSheet(
-                        this,
-                        onAdd = { createTask() },
-                        onImport = { importTask() }
-                    )
-                }
-            }
-
-            R.id.menu_settings -> MainDialogManager.showUsageNotice(this) {
-                navigatePageTo<SettingsActivity>()
-            }
         }
     }
 
